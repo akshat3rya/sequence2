@@ -1,0 +1,36 @@
+// Quick end-to-end check: node server/smoke.mjs  (server must be running on :3001)
+import { io } from 'socket.io-client';
+const url = 'http://localhost:3001';
+const call = (s, ev, p) => new Promise((res) => s.emit(ev, p, res));
+const a = io(url), b = io(url);
+let lastA, lastB;
+a.on('room:state', (v) => (lastA = v));
+b.on('room:state', (v) => (lastB = v));
+await new Promise((r) => setTimeout(r, 300));
+const created = await call(a, 'room:create', { playerId: 'pa', name: 'Alice' });
+console.log('create', created);
+console.log('join', await call(b, 'room:join', { roomId: created.roomId, playerId: 'pb', name: 'Bob' }));
+console.log('non-host start', await call(b, 'room:start', {}));
+console.log('start', await call(a, 'room:start', {}));
+await new Promise((r) => setTimeout(r, 200));
+console.log('phase', lastA.phase, 'turn', lastA.game.turn, 'hands', lastA.game.myHand.length, lastB.game.myHand.length);
+const mv = lastA.game.legal.find((m) => m.type === 'play');
+console.log('A move', await call(a, 'game:move', { move: mv }));
+console.log('A moves again (illegal)', await call(a, 'game:move', { move: mv }));
+console.log('garbage', await call(a, 'game:move', { move: null }));
+const mvB = (await new Promise((r) => setTimeout(r, 200)) , lastB.game.legal.find((m) => m.type === 'play'));
+console.log('B move', await call(b, 'game:move', { move: mvB }));
+console.log('chat', await call(a, 'chat:send', { text: 'hi' }));
+await new Promise((r) => setTimeout(r, 200));
+console.log('chat seen by B:', lastB.chat.map((c) => c.text));
+console.log('hidden info check — B sees A hand? ', JSON.stringify(lastB.game).includes('"hands"'));
+// solo vs bot
+const c = io(url); let lastC; c.on('room:state', (v) => (lastC = v));
+await new Promise((r) => setTimeout(r, 200));
+const solo = await call(c, 'room:create', { playerId: 'pc', name: 'Carol', solo: true });
+await new Promise((r) => setTimeout(r, 200));
+console.log('solo phase', lastC.phase, 'seats', lastC.seats.map((s) => s.name));
+await call(c, 'game:move', { move: lastC.game.legal.find((m) => m.type === 'play') });
+await new Promise((r) => setTimeout(r, 1600));
+console.log('after bot reply, turn back to me?', lastC.game.turn === lastC.mySeat, 'moves on board', lastC.game.board.flat().filter((x) => x !== null).length);
+process.exit(0);
